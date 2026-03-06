@@ -66,15 +66,30 @@ openclaw gateway
 
 ### 问题 1: WSL 中 DNS 解析失败
 
-**现象:** `Temporary failure resolving 'archive.ubuntu.com'`
+**现象:** 
+- `Temporary failure resolving 'archive.ubuntu.com'`
+- 或飞书消息无回复，日志中出现 `getaddrinfo EAI_AGAIN open.feishu.cn`
+- `ping` 可能通，但 Node.js 进程仍然解析失败（Gateway 启动时缓存了旧的 DNS 配置）
 
-**原因:** WSL 的 DNS 配置不正确。
+**原因:** WSL 的 DNS 配置不正确，且 8.8.8.8 在国内可能被墙。
 
 **解决:**
 ```bash
-echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
-ping -c 3 archive.ubuntu.com  # 验证
+# 国内环境用阿里/114 DNS
+echo -e "nameserver 223.5.5.5\nnameserver 114.114.114.114" | sudo tee /etc/resolv.conf
+
+# 重要：修改 DNS 后必须重启 Gateway
+openclaw gateway stop
+openclaw gateway
 ```
+
+**永久解决（防止 WSL 重启后 DNS 被重置）：**
+```bash
+sudo bash -c 'echo -e "[network]\ngenerateResolvConf = false" > /etc/wsl.conf'
+echo -e "nameserver 223.5.5.5\nnameserver 114.114.114.114" | sudo tee /etc/resolv.conf
+```
+
+> ⚠️ 修改 DNS 后必须重启 Gateway，`ping` 通不代表 Gateway 进程能解析，Node.js 可能缓存了旧的 DNS 结果。
 
 ### 问题 2: `openclaw` 命令找不到
 
@@ -127,20 +142,11 @@ cat ~/.openclaw/agents/main/agent/models.json
 curl http://你的vLLM地址:端口/v1/models
 ```
 
-### 问题 6: HTTP 400 错误（API 类型不匹配）
+### 问题 6: HTTP 400 错误（vLLM 调用失败）
 
 **现象:** `400 status code (no body)`
 
-**原因 A:** models.json 中 `api` 设为 `openai-completions`，但 vLLM 提供的是 chat completions 接口。
-
-**解决:**
-```bash
-sed -i 's/openai-completions/openai-chat-completions/g' ~/.openclaw/agents/main/agent/models.json
-openclaw gateway stop
-openclaw gateway
-```
-
-**原因 B:** vLLM 未启用 tool calling 支持。OpenClaw 作为 agent 框架会自动发送 tools 参数。
+**原因 A:** vLLM 未启用 tool calling 支持。OpenClaw 作为 agent 框架会自动发送 tools 参数。
 
 **验证:**
 ```bash
@@ -149,17 +155,33 @@ curl http://vLLM地址:端口/v1/chat/completions \
   -d '{"model":"模型名","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"test","description":"test","parameters":{"type":"object","properties":{}}}}]}'
 ```
 
-如果报错 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`，需要重启 vLLM：
+如果报错 `enable-auto-tool-choice`，需要重启 vLLM 加参数：
 
 ```bash
 vllm serve Qwen/Qwen3-14B --enable-auto-tool-choice --tool-call-parser hermes
+```
+
+**原因 B:** `openclaw.json` 中 `models.providers.vllm.api` 配置错误。
+
+**注意：** OpenClaw 2026.2.26 版本支持的 api 类型为：`openai-completions`、`openai-responses`、`openai-codex-responses`、`anthropic-messages`、`google-generative-ai`、`github-copilot`、`bedrock-converse-stream`、`ollama`。vLLM 应使用 `openai-completions`（不是 `openai-chat-completions`，该选项在此版本中不存在）。
+
+**验证配置：**
+```bash
+grep "api" ~/.openclaw/openclaw.json
 ```
 
 ### 问题 7: 飞书插件 duplicate plugin 警告
 
 **现象:** `plugin feishu: duplicate plugin id detected`
 
-**影响:** 不影响使用，可忽略。如需消除，检查 `~/.openclaw/extensions/` 和全局安装目录是否有重复的 feishu 插件。
+**原因：** `~/.openclaw/extensions/feishu/` 和 npm 全局安装目录下各有一份 feishu 插件
+
+**影响:** 不影响使用，可忽略。如需消除警告：
+```bash
+rm -rf /home/ryan/.npm-global/lib/node_modules/openclaw/extensions/feishu
+openclaw gateway stop
+openclaw gateway
+```
 
 ## 关键配置文件路径
 
@@ -184,6 +206,97 @@ openclaw configure --section model  # 重新配置模型
 openclaw status               # 查看运行状态
 openclaw --help               # 查看所有命令
 ```
+
+## 飞书（Feishu）对接配置
+
+### 1. 创建飞书应用
+
+- 登录 [飞书开放平台](https://open.feishu.cn/app)，创建企业自建应用
+- 在「凭证与基础信息」页面获取 App ID（`cli_xxx`）和 App Secret
+
+### 2. 开启机器人能力
+
+- 应用详情 → 添加应用能力 → 启用「机器人」
+- 不开启会报错：`API error: app do not have bot`
+
+### 3. 配置权限
+
+在「权限管理」中开启以下权限：
+
+- `im:message` — 获取与发送消息
+- `im:message:send_as_bot` — 以机器人身份发送消息
+- `im:message.p2p_msg:readonly` — 读取私聊消息
+- `im:message.group_at_msg:readonly` — 接收群聊 @消息
+- `im:resource` — 读取消息中的资源文件
+
+### 4. 配置事件订阅
+
+- 「事件与回调」→ 订阅方式选「使用长连接接收事件」
+- 添加事件：`im.message.receive_v1`
+- **注意：** gateway 必须在运行状态，否则长连接配置可能保存失败
+
+### 5. 发布应用
+
+- 「版本管理与发布」→ 创建版本 → 提交审批
+- 审批通过后机器人才能在飞书客户端中使用
+
+### 6. 配置 OpenClaw
+
+```bash
+openclaw channels add
+# 选择 Feishu，输入 App ID 和 App Secret
+```
+
+或直接编辑 `~/.openclaw/openclaw.json`：
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "dmPolicy": "allowlist",
+      "allowFrom": ["ou_你的open_id"],
+      "accounts": {
+        "main": {
+          "appId": "cli_xxx",
+          "appSecret": "xxx"
+        }
+      }
+    }
+  }
+}
+```
+
+### 7. 重启 Gateway 并测试
+
+```bash
+openclaw gateway stop
+openclaw gateway
+```
+
+在飞书客户端搜索机器人名字，发消息测试。
+
+### 常见问题
+
+- **`app do not have bot`：** 飞书应用未开启机器人能力
+- **`Access denied. scopes required: im:message`：** 权限未开启或未发布新版本
+- **`getaddrinfo EAI_AGAIN open.feishu.cn`：** WSL DNS 问题，设置国内 DNS 后必须重启 Gateway：
+  ```bash
+  echo -e "nameserver 223.5.5.5\nnameserver 114.114.114.114" | sudo tee /etc/resolv.conf
+  openclaw gateway stop
+  openclaw gateway
+  ```
+  永久解决见「问题 1: WSL 中 DNS 解析失败」
+- **`access not configured` + pairing code：** 需要批准用户或改为 allowlist/open 模式
+
+### DM 策略说明
+
+| 值 | 行为 |
+|---|------|
+| `pairing` | 默认，未知用户需 pairing code 批准 |
+| `allowlist` | 只允许 allowFrom 列表中的用户 |
+| `open` | 允许所有用户（需设 `allowFrom: ["*"]`） |
+| `disabled` | 禁用私聊 |
 
 ## Token 消耗说明
 
