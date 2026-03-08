@@ -91,7 +91,26 @@ echo -e "nameserver 223.5.5.5\nnameserver 114.114.114.114" | sudo tee /etc/resol
 
 > ⚠️ 修改 DNS 后必须重启 Gateway，`ping` 通不代表 Gateway 进程能解析，Node.js 可能缓存了旧的 DNS 结果。
 
-### 问题 2: `openclaw` 命令找不到
+### 问题 2: npm install 报 ECONNRESET（国内网络问题）
+
+**现象:** `npm error code ECONNRESET` 或 `npm error network aborted`，安装脚本重试后仍然失败。
+
+**原因:** npm 官方源（registry.npmjs.org）在国内连接不稳定，TCP 连接被重置。DNS 正常但网络层断开。
+
+**解决:**
+```bash
+# 换成国内 npmmirror 镜像源
+npm config set registry https://registry.npmmirror.com
+
+# 重新安装
+npm install -g openclaw@latest
+# 或重新跑安装脚本
+curl -fsSL https://openclaw.ai/install.sh | bash
+```
+
+> 该设置是永久的，不需要每次都设。如需切回官方源：`npm config set registry https://registry.npmjs.org`
+
+### 问题 3: `openclaw` 命令找不到
 
 **现象:** `openclaw: command not found`
 
@@ -104,7 +123,7 @@ echo 'export PATH="$(npm prefix -g)/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 问题 3: Dashboard 认证失败
+### 问题 4: Dashboard 认证失败
 
 **现象:** `unauthorized: gateway token missing` 或 `too many failed authentication attempts`
 
@@ -114,7 +133,7 @@ openclaw dashboard --no-open
 ```
 复制输出的完整 URL（含 `#token=...`）到浏览器打开。
 
-### 问题 4: WSL 中浏览器无法访问 127.0.0.1
+### 问题 5: WSL 中浏览器无法访问 127.0.0.1
 
 **现象:** Windows 浏览器访问 `127.0.0.1:18789` 报 `ERR_CONNECTION_REFUSED`
 
@@ -126,7 +145,7 @@ hostname -I  # 获取 WSL 的实际 IP（如 172.x.x.x）
 ```
 用该 IP 替换 `127.0.0.1` 访问。或直接用 `openclaw tui` 在终端聊天。
 
-### 问题 5: Agent 报 Connection error
+### 问题 6: Agent 报 Connection error
 
 **现象:** 发消息后返回 `Connection error`
 
@@ -142,7 +161,7 @@ cat ~/.openclaw/agents/main/agent/models.json
 curl http://你的vLLM地址:端口/v1/models
 ```
 
-### 问题 6: HTTP 400 错误（vLLM 调用失败）
+### 问题 7: HTTP 400 错误（vLLM 调用失败）
 
 **现象:** `400 status code (no body)`
 
@@ -170,7 +189,7 @@ vllm serve Qwen/Qwen3-14B --enable-auto-tool-choice --tool-call-parser hermes
 grep "api" ~/.openclaw/openclaw.json
 ```
 
-### 问题 7: 飞书插件 duplicate plugin 警告
+### 问题 8: 飞书插件 duplicate plugin 警告
 
 **现象:** `plugin feishu: duplicate plugin id detected`
 

@@ -2277,3 +2277,72 @@ agent main | session test2 (openclaw-tui) | vllm/Qwen/Qwen3-14B | tokens 15k/128
 涵盖了这次安装过程中遇到的所有问题：DNS 解析、PATH 配置、认证、WSL 网络、API 类型不匹配、vLLM tool calling 支持等，以及关键配置文件路径和常用命令速查。
 
 ---
+
+**User:**
+
+更新 OpenClaw 到 v2026.3.2 时安装失败：
+
+```
+[2/3] Installing OpenClaw
+✓ Git already installed
+· Configuring npm for user-local installs
+✓ npm configured for user installs
+· Installing OpenClaw v2026.3.2
+! npm install failed for openclaw@latest
+Command: env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm --loglevel error --silent --no-fund --no-audit install -g openclaw@latest
+! npm install failed; retrying
+! npm install failed for openclaw@latest
+```
+
+手动跑 `npm install -g openclaw@latest` 后看到具体错误：
+
+```
+npm error code ECONNRESET
+npm error network aborted
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+```
+
+DNS 配置正常（223.5.5.5），磁盘空间充足。
+
+---
+
+**Assistant:**
+
+这是 npm 官方源（registry.npmjs.org）在国内连接不稳定导致的 `ECONNRESET`。DNS 没问题，但 TCP 连接被重置了。
+
+解决办法是换成国内 npm 镜像源：
+
+```bash
+npm config set registry https://registry.npmmirror.com
+```
+
+设置完之后重新安装：
+
+```bash
+npm install -g openclaw@latest
+```
+
+或者重新跑安装脚本：
+
+```bash
+curl -fsSL https://openclaw.ai/install.sh | bash
+```
+
+---
+
+**User:**
+
+换源有用，安装成功了。
+
+---
+
+**Assistant:**
+
+好的。以后在国内环境装 npm 包如果遇到网络问题，第一步就是换 npmmirror 镜像源。这个设置是永久的，不需要每次都设。
+
+如果想切回官方源：
+
+```bash
+npm config set registry https://registry.npmjs.org
+```
